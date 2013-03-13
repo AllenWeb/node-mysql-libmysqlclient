@@ -382,12 +382,17 @@ void MysqlConnection::EIO_After_Connect(uv_work_t *req) {
         argv[0] = Local<Value>::New(Null());
     }
 
-    node::MakeCallback(Context::GetCurrent()->Global(), conn_req->callback, argc, argv);
+    Persistent<Function> *callback = node::cb_unwrap(conn_req->callback);
 
-    conn_req->callback.Dispose();
+    node::MakeCallback(
+        Context::GetCurrent()->Global(),
+        *callback,
+        argc, argv
+    );
+
+    node::cb_destroy(callback);
 
     conn_req->conn->Unref();
-
     delete conn_req;
 
     delete req;
@@ -434,24 +439,21 @@ Handle<Value> MysqlConnection::Connect(const Arguments& args) {
     if (conn->_conn) {
         const int argc = 1;
         Local<Value> argv[argc];
-
         argv[0] = V8EXC("Already initialized. "
                         "Use conn.realConnectSync() after conn.initSync()");
 
-        TryCatch try_catch;
-
-        callback->Call(Context::GetCurrent()->Global(), argc, argv);
-
-        if (try_catch.HasCaught()) {
-            node::FatalException(try_catch);
-        }
+        node::MakeCallback(
+            Context::GetCurrent()->Global(),
+            callback,
+            argc, argv
+        );
 
         return Undefined();
     }
 
     connect_request *conn_req = new connect_request;
 
-    conn_req->callback = Persistent<Function>::New(callback);
+    conn_req->callback = node::cb_persist(callback);
     conn_req->conn = conn;
     conn->Ref();
 
@@ -1029,15 +1031,18 @@ void MysqlConnection::EIO_After_Query(uv_work_t *req) {
         argv[0] = Local<Value>::New(Null());
     }
 
-    if (query_req->callback->IsFunction()) {
+    if (query_req->callback) {
         DEBUG_PRINTF("EIO_After_Query: node::MakeCallback\n");
+
+        Persistent<Function> *callback = node::cb_unwrap(query_req->callback);
+
         node::MakeCallback(
             Context::GetCurrent()->Global(),
-            Persistent<Function>::Cast(query_req->callback),
+            *callback,
             argc, argv
         );
 
-        query_req->callback.Dispose();
+        node::cb_destroy(callback);
     }
 
     // See comment above
@@ -1127,7 +1132,9 @@ void MysqlConnection::EIO_Query(uv_work_t *req) {
 
 /**
  * MysqlConnection#query(query, callback)
+ * MysqlConnection#query(query, local_infile_buffer, callback)
  * - query (String): Query
+ * - local_infile_buffer (Buffer): Buffer for LOAD DATA LOCAL INFILE operations
  * - callback (Function): Callback function, gets (error, result)
  *
  * Performs a query on the database.
@@ -1138,14 +1145,9 @@ Handle<Value> MysqlConnection::Query(const Arguments& args) {
 
     REQ_STR_ARG(0, query);
     OPTIONAL_BUFFER_ARG(1, local_infile_buffer);
-
-    Handle<Value> callback;
+    int cb_arg_index = 2;
     if (local_infile_buffer->IsNull()) {
-      OPTIONAL_FUN_ARG(1, possibly_callback);
-      callback = possibly_callback;
-    } else {
-      OPTIONAL_FUN_ARG(2, possibly_callback);
-      callback = possibly_callback;
+        cb_arg_index = 1;
     }
 
     MysqlConnection *conn = OBJUNWRAP<MysqlConnection>(args.Holder());
@@ -1162,7 +1164,7 @@ Handle<Value> MysqlConnection::Query(const Arguments& args) {
     memcpy(query_req->query, *query, query_len);
     query_req->query[query_len] = '\0';
 
-    query_req->callback = Persistent<Value>::New(callback);
+    query_req->callback = node::cb_persist(args[cb_arg_index]);
     query_req->conn = conn;
     conn->Ref();
 
@@ -1265,7 +1267,7 @@ Handle<Value> MysqlConnection::QuerySend(const Arguments& args) {
     HandleScope scope;
 
     REQ_STR_ARG(0, query);
-    OPTIONAL_FUN_ARG(1, callback);
+    REQ_FUN_ARG(1, callback);
 
     MysqlConnection *conn = OBJUNWRAP<MysqlConnection>(args.Holder());
 
@@ -1280,7 +1282,7 @@ Handle<Value> MysqlConnection::QuerySend(const Arguments& args) {
     memcpy(query_req->query, *query, query_len);
     query_req->query[query_len] = '\0';
 
-    query_req->callback = Persistent<Value>::New(callback);
+    query_req->callback = node::cb_persist(callback);
     query_req->conn = conn;
     conn->Ref();
 

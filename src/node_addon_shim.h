@@ -56,3 +56,16 @@
     #define NODE_ADDON_SHIM_IO_WATCH_CALLBACK_ARGUMENTS \
       EV_P_ ev_io *io_watcher, int events
 #endif
+
+/* Backport MakeCallback from Node v0.7.8 */
+/*#if NODE_VERSION_AT_LEAST(0, 7, 8)
+  // Nothing
+#else
+    namespace node {
+        v8::Handle<v8::Value>
+        MakeCallback(const v8::Handle<v8::Object> object,
+                     const v8::Handle<v8::Function> callback,
+                     int argc,
+                     v8::Handle<v8::Value> argv[]);
+    }  // namespace node
+#endif*/
